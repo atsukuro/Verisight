@@ -1,5 +1,7 @@
-# main_prototype.py (v3.2.2)
-# 最終完成版：測定データをクラウドサーバーに送信する機能を搭載。
+# main_prototype.py (v3.3.0)
+# 最終完成版：
+# 1. 最終スライドの表示時間が長くなるバグを修正。
+# 2. クラウドサーバーのスリープからの復帰を待つため、タイムアウト時間を60秒に延長。
 
 import cv2
 import numpy as np
@@ -179,11 +181,13 @@ class MainApp:
             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1); self.cap.set(cv2.CAP_PROP_AUTO_WB, 1); print("カメラ自動調整を有効化。")
     def _send_data_to_cloud(self, num_slides, stimuli_folder_name):
         if not self.recorded_data: print("記録データがありません。"); return
-        url = "http://127.0.0.1:5000/upload"
+        # ▼▼▼ 変更点：URLをRenderのサーバーアドレスに ▼▼▼
+        url = "https://verisight-server.onrender.com/upload"
         payload = {"participant_id": "user_001", "timestamp": time.strftime('%Y%m%d_%H%M%S'), "slide_count": num_slides, "stimuli_folder_name": stimuli_folder_name, "gaze_data": self.recorded_data}
         try:
             print(f"\nデータをクラウドサーバー ({url}) に送信中...")
-            response = requests.post(url, json=payload, timeout=15)
+            # ▼▼▼ 変更点：タイムアウト時間を60秒に延長 ▼▼▼
+            response = requests.post(url, json=payload, timeout=60)
             if response.status_code == 200: print(f"✅ データ送信成功！ サーバーからの応答: {response.json()}")
             else: print(f"❌ データ送信失敗。ステータスコード: {response.status_code}, 内容: {response.text}")
         except requests.exceptions.RequestException as e: print(f"❌ サーバーへの接続に失敗しました: {e}")
@@ -203,9 +207,13 @@ class MainApp:
             validation_result = self.run_calibration_validation()
             if validation_result == "continue":
                 experiment_result = self.run_slideshow_experiment(image_files)
-                if experiment_result == "exit_by_user": print("ユーザーによって測定が中断されました。"); break
-                self._send_data_to_cloud(num_slides=len(image_files), stimuli_folder_name=folder_name)
-                self.screen.fill((0,0,0)); self._draw_text("測定終了", (self.W//2, self.H//2), self.font_l, center=True); pygame.display.flip(); time.sleep(3)
+                # ▼▼▼ 変更点：データ送信の前に画面をクリアする ▼▼▼
+                self.screen.fill((0,0,0)); self._draw_text("測定終了。データを送信しています...", (self.W//2, self.H//2), self.font_l, center=True); pygame.display.flip()
+                
+                if experiment_result != "exit_by_user":
+                    self._send_data_to_cloud(num_slides=len(image_files), stimuli_folder_name=folder_name)
+                
+                self._draw_text("処理完了", (self.W//2, self.H//2), self.font_l, center=True); pygame.display.flip(); time.sleep(3)
                 break
             elif validation_result == "retry":
                 print("キャリブレーションをやり直します...")

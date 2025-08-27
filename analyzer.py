@@ -1,5 +1,7 @@
 # analyzer.py (v1.9.2)
-# 最終完成版：コマンドライン引数で動作し、絵文字を含まない安定版。
+# バグ修正：
+# 1. Windowsのコンソール(cp932)で文字化け・エラーの原因となる絵文字を
+#    print文からすべて削除。
 
 import pandas as pd
 import cv2
@@ -12,13 +14,16 @@ import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
 import argparse
 
+# --- 日本語フォント設定 ---
 FONT_PATH = 'NotoSansJP-Regular.ttf'
-if os.path.exists(FONT_PATH): jp_font = FontProperties(fname=FONT_PATH)
-else: print(f"警告: 日本語フォント '{FONT_PATH}' 未検出"); jp_font = None
+if os.path.exists(FONT_PATH):
+    jp_font = FontProperties(fname=FONT_PATH)
+else:
+    print(f"警告: 日本語フォントファイル '{FONT_PATH}' が見つかりません。")
+    jp_font = None
 
-def generate_heatmap(image, gaze_points):
+def generate_heatmap(image, gaze_points, kernel_size=151, sigma=30):
     h, w = image.shape[:2]; heatmap = np.zeros((h, w), dtype=np.float32)
-    kernel_size=151; sigma=30
     for x, y in gaze_points:
         if 0 <= x < w and 0 <= y < h:
             x_min, x_max = max(0, x - kernel_size//2), min(w, x + kernel_size//2)
