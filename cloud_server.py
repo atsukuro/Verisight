@@ -43,7 +43,7 @@ def upload_data():
     encoding = 'cp932' if sys.platform == 'win32' else 'utf-8'
 
     try:
-        result = subprocess.run(command, capture_output=True, text=True, encoding=encoding, check=False)
+        result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', check=False)
 
         print("\n--- analyzer.py output ---"); print(result.stdout); print("--- end of output ---\n")
 
