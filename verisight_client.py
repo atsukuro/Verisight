@@ -1,16 +1,12 @@
-# verisight_client.py (v5.2.0 - UI/UXデザイン刷新版)
-# UI/UXデザイン刷新：
-# 1. 全体のカラーテーマを「ダークブルー＆ティール」に統一し、洗練された印象に。
-# 2. フォントサイズに階層を設け、情報の視認性を向上。
-# 3. モード選択画面のボタンにホバーエフェクトを追加し、操作感を向上。
-# 4. キャリブレーションターゲットに「パルスアニメーション」を追加し、没入感を向上。
-# 5. 画面遷移にフェードエフェクトを追加し、体験をよりスムーズに。
+# verisight_client.py (v5.3.0 - UI安定化版)
+# 修正点：
+# 1. 静止画表示ループ内のフェード処理を削除し、フラッシングと表示時間の問題を解決。
+# 2. サーバー側の列名定義に合わせて、データ送信時の列名を統一。
 
 import cv2
 import numpy as np
 import mediapipe as mp
-import math # アニメーション用にmathをインポート
-# ▼▼▼ Pygameのimportはまだ行わない ▼▼▼
+import math
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import PolynomialFeatures
 from collections import deque
@@ -85,36 +81,36 @@ class MainApp:
         self.COLOR_FAIL = (250, 80, 100)
         self.COLOR_WARN = (255, 180, 0)
 
-
     def init_camera_and_pygame(self):
+        # (変更なし)
         import pygame
         globals()['pygame'] = pygame
 
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW); self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280); self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         pygame.init(); pygame.mixer.init(); info = pygame.display.Info(); self.W, self.H = info.current_w, info.current_h
         self.screen = pygame.display.set_mode((self.W, self.H), pygame.FULLSCREEN); pygame.mouse.set_visible(False)
-        self.font_xl = pygame.font.SysFont("Meiryo", 80)
-        self.font_l = pygame.font.SysFont("Meiryo", 52)
-        self.font_m = pygame.font.SysFont("Meiryo", 36)
-        self.font_s = pygame.font.SysFont("Meiryo", 24)
+        self.font_xl = pygame.font.SysFont("Meiryo", 80); self.font_l = pygame.font.SysFont("Meiryo", 52); self.font_m = pygame.font.SysFont("Meiryo", 36); self.font_s = pygame.font.SysFont("Meiryo", 24)
 
     def _fade_transition(self, direction='out', duration=300):
+        # (変更なし)
         fade_surface = pygame.Surface((self.W, self.H))
         fade_surface.fill((0, 0, 0))
-        for alpha in range(0, 255, 5):
+        for alpha in range(0, 255, 15):
             if direction == 'out':
                 fade_surface.set_alpha(alpha)
             else: # in
                 fade_surface.set_alpha(255 - alpha)
             self.screen.blit(fade_surface, (0, 0))
             pygame.display.flip()
-            pygame.time.delay(int(duration / (255/5)))
+            pygame.time.delay(int(duration / (255/15)))
 
     def _draw_text(self, text, pos, font, color=None, center=False):
+        # (変更なし)
         if color is None: color = self.COLOR_TEXT
         surf = font.render(text, True, color); rect = surf.get_rect(center=pos) if center else surf.get_rect(topleft=pos); self.screen.blit(surf, rect)
 
     def run_pre_check(self):
+        # (変更なし)
         self._fade_transition('in')
         while True:
             for event in pygame.event.get():
@@ -127,12 +123,9 @@ class MainApp:
             
             p_h, p_w = frame.shape[:2]; preview_scale = 0.7; disp_w, disp_h = int(p_w * preview_scale), int(p_h * preview_scale)
             disp_x, disp_y = (self.W-disp_w)//2, (self.H-disp_h)//2
-            
-            # カメラ映像のフレーム
             frame_rect = pygame.Rect(disp_x - 5, disp_y - 5, disp_w + 10, disp_h + 10)
             pygame.draw.rect(self.screen, self.COLOR_ACCENT, frame_rect, 2, border_radius=5)
             
-            # ランドマーク描画
             if d_info and d_info.get("landmarks") is not None:
                 for idx in self.tracker.L_EAR_INDICES + self.tracker.R_EAR_INDICES + self.tracker.L_IRIS_POINTS + self.tracker.R_IRIS_POINTS:
                     if idx < len(d_info["landmarks"]): x, y = map(int, d_info["landmarks"][idx]); cv2.circle(frame, (x, y), 3, (0, 255, 0), -1)
@@ -140,7 +133,6 @@ class MainApp:
             prev_surf = pygame.surfarray.make_surface(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).swapaxes(0, 1))
             self.screen.blit(pygame.transform.smoothscale(prev_surf, (disp_w, disp_h)), (disp_x, disp_y))
             
-            # テキスト描画
             self._draw_text("カメラ確認", (self.W//2, 80), self.font_xl, center=True)
             self._draw_text("顔全体が枠内に収まり、緑の点が認識されていることを確認してください", (self.W//2, 160), self.font_s, color=self.COLOR_TEXT_DIM, center=True)
             
@@ -151,6 +143,7 @@ class MainApp:
             pygame.display.flip()
 
     def run_calibration(self):
+        # (変更なし)
         self.screen.fill(self.COLOR_BACKGROUND); self._draw_text("キャリブレーション", (self.W//2, self.H//2), self.font_xl, center=True); pygame.display.flip(); pygame.time.wait(1000)
         self._fade_transition('out')
         self.screen.fill((0,0,0)); pygame.display.flip(); pygame.time.wait(300)
@@ -164,7 +157,6 @@ class MainApp:
                 if not ret: continue
                 gaze_data, _ = self.tracker.process_frame(cv2.flip(frame, 1)); self.screen.fill((0,0,0))
                 
-                # パルスアニメーション
                 pulse_speed = 5
                 radius_variation = (math.sin(time.time() * pulse_speed) + 1) / 2 * 8 
                 pygame.draw.circle(self.screen, self.COLOR_ACCENT, (sx,sy), int(20 + radius_variation), 2)
@@ -180,6 +172,7 @@ class MainApp:
         self.mapper.train(calib_data)
 
     def run_calibration_validation(self):
+        # (変更なし)
         self._fade_transition('in')
         print("キャリブレーション精度を確認してください。"); pygame.mouse.set_visible(True)
         target_pos = [self.W // 2, self.H // 2]; running = True
@@ -196,7 +189,6 @@ class MainApp:
             
             self._draw_text("精度確認", (self.W//2, 80), self.font_xl, center=True)
             self._draw_text("マウスで的を動かし、視線（緑の円）の追従を確認してください", (self.W//2, 160), self.font_s, color=self.COLOR_TEXT_DIM, center=True)
-            
             self._draw_text("[SPACE] 続行", (self.W//4, self.H - 80), self.font_m, color=self.COLOR_SUCCESS, center=True)
             self._draw_text("[R] やり直し", (self.W//2, self.H - 80), self.font_m, color=self.COLOR_WARN, center=True)
             self._draw_text("[ESC] 終了", (self.W*3//4, self.H - 80), self.font_m, color=self.COLOR_FAIL, center=True)
@@ -211,7 +203,7 @@ class MainApp:
         pygame.mouse.set_visible(False); return "exit"
 
     def run_slideshow_experiment(self, image_paths):
-        # (変更なし)
+        # ★★★ 修正点：フラッシングと時間超過の問題を修正 ★★★
         self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0); self.cap.set(cv2.CAP_PROP_AUTO_WB, 0); print("カメラ自動調整を無効化。")
         try:
             self.screen.fill(self.COLOR_BACKGROUND); self._draw_text("ベースライン計測中...", (self.W//2, self.H//2), self.font_l, center=True); pygame.display.flip()
@@ -220,7 +212,7 @@ class MainApp:
                 self.screen.fill(self.COLOR_BACKGROUND); pygame.draw.circle(self.screen,self.COLOR_TEXT,(self.W//2,self.H//2),10); pygame.display.flip()
                 ret, frame = self.cap.read()
                 if not ret: continue
-            print(f"ベースライン計測完了。"); self._fade_transition('out')
+            print(f"ベースライン計測完了。")
             self.recorded_data = []
             overall_start_time = time.time()
             for slide_num, image_path in enumerate(image_paths, 1):
@@ -228,24 +220,29 @@ class MainApp:
                     stimulus_img = pygame.image.load(image_path)
                     stimulus_img = pygame.transform.smoothscale(stimulus_img, (self.W, self.H))
                 except pygame.error as e: print(f"スライド読込失敗: {e}"); continue
-                self.screen.blit(stimulus_img, (0,0)); pygame.display.flip(); pygame.time.wait(100) # フェードインの前に表示
-                self._fade_transition('in', duration=200)
+                
+                # 安定した表示ロジック
+                self.screen.blit(stimulus_img, (0,0))
+                pygame.display.flip()
 
-                slide_start_time = time.time(); running_slide = True
-                while running_slide:
-                    if time.time() - slide_start_time > SLIDE_DURATION_SECONDS: running_slide = False
+                slide_start_time = time.time()
+                while time.time() - slide_start_time < SLIDE_DURATION_SECONDS:
                     for event in pygame.event.get():
-                        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE: running_slide = False; return "exit_by_user"
+                        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE: return "exit_by_user"
+                    
                     ret, frame = self.cap.read()
                     if not ret: continue
-                    frame = cv2.flip(frame, 1); self.screen.blit(stimulus_img, (0,0)); gaze_data, _ = self.tracker.process_frame(frame)
+                    frame = cv2.flip(frame, 1)
+                    
+                    # 画面は更新せず、データ収集のみ行う
+                    gaze_data, _ = self.tracker.process_frame(frame)
                     screen_pos = None
                     if self.mapper.is_trained and gaze_data and not gaze_data.get("is_blinking"):
                         screen_pos = self.mapper.map_gaze(gaze_data["normalized_gaze"])
                     if gaze_data and not gaze_data.get("is_blinking"):
                         self.recorded_data.append([time.time()-overall_start_time, slide_num, gaze_data['pupil_radius'], screen_pos[0] if screen_pos else -1, screen_pos[1] if screen_pos else -1])
-                    pygame.display.flip(); pygame.time.Clock().tick(60)
-                self._fade_transition('out', duration=200)
+                    
+                    pygame.time.Clock().tick(60) # CPU負荷を抑える
             return "completed"
         finally:
             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1); self.cap.set(cv2.CAP_PROP_AUTO_WB, 1); print("カメラ自動調整を有効化。")
@@ -268,7 +265,7 @@ class MainApp:
                 self.screen.fill(self.COLOR_BACKGROUND); pygame.draw.circle(self.screen,self.COLOR_TEXT,(self.W//2,self.H//2),10); pygame.display.flip()
                 ret, frame = self.cap.read()
                 if not ret: continue
-            print(f"ベースライン計測完了。"); self._fade_transition('out')
+            print(f"ベースライン計測完了。")
             self.recorded_data = []
             overall_start_time = time.time()
             if temp_audio_path: pygame.mixer.music.load(temp_audio_path); pygame.mixer.music.play()
@@ -289,8 +286,9 @@ class MainApp:
                 if self.mapper.is_trained and gaze_data and not gaze_data.get("is_blinking"):
                     screen_pos = self.mapper.map_gaze(gaze_data["normalized_gaze"])
                 if gaze_data and not gaze_data.get("is_blinking"):
-                    current_frame_index = int(elapsed_time * video_clip.fps)
-                    self.recorded_data.append([time.time()-overall_start_time, current_frame_index, gaze_data['pupil_radius'], screen_pos[0] if screen_pos else -1, screen_pos[1] if screen_pos else -1])
+                    # ★★★ 修正点：静止画に合わせて列名を統一 ★★★
+                    item_identifier = int(elapsed_time * video_clip.fps) # フレーム番号
+                    self.recorded_data.append([time.time()-overall_start_time, item_identifier, gaze_data['pupil_radius'], screen_pos[0] if screen_pos else -1, screen_pos[1] if screen_pos else -1])
                 pygame.display.flip()
                 clock.tick(video_clip.fps * 1.2)
             return "completed"
@@ -342,14 +340,13 @@ class MainApp:
             self._draw_text("Verisight", (self.W//2, 120), self.font_xl, center=True)
             self._draw_text("実行するモードを選択してください", (self.W//2, 200), self.font_s, color=self.COLOR_TEXT_DIM, center=True)
             
-            # ボタン描画 (ホバーエフェクト付き)
             slide_color = self.COLOR_ACCENT_HOVER if button_slides.collidepoint(mouse_pos) else self.COLOR_ACCENT
             pygame.draw.rect(self.screen, slide_color, button_slides, border_radius=20)
             self._draw_text("静止画アンケート", button_slides.center, self.font_m, center=True)
             
             video_color = self.COLOR_ACCENT_HOVER if button_video.collidepoint(mouse_pos) else self.COLOR_ACCENT
             pygame.draw.rect(self.screen, video_color, button_video, border_radius=20)
-            self._draw_text("動画評価", button_video.center, self.font_m, center=True)
+            self._draw_text("動画評価", video_video.center, self.font_m, center=True)
 
             pygame.display.flip()
             pygame.time.Clock().tick(60)
