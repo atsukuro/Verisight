@@ -6,6 +6,7 @@
 import pandas as pd
 import cv2
 import numpy as np
+import easygui
 import os
 import glob
 import time
@@ -185,6 +186,7 @@ def main():
             load_fig = generate_cognitive_load_graph(s_df, num)
             load_fig.savefig(os.path.join(output_folder, f"{stimuli_folder_name}_cognitiveload_slide_{num}.png"), dpi=150); plt.close(load_fig)
         
+        # ▼▼▼ 変更点：絵文字を削除 ▼▼▼
         print(f"スライド {question_slide_num} & {answer_slide_num} の分析・可視化が完了しました。")
 
         positive_pzs_q_df = q_slide_df[q_slide_df['pzs'] > 0]; positive_pzs_a_df = a_slide_df[a_slide_df['pzs'] > 0]
