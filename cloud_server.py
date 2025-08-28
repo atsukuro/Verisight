@@ -1,10 +1,15 @@
-# cloud_server.py (v2.0.0 - 動画分析対応版)
+# cloud_server.py (v2.1.0 - 最終完成版：非同期処理対応)
+# 修正点：
+# 1. 時間のかかる分析処理をバックグラウンドのスレッドで実行するように変更。
+# 2. クライアントにはデータ受信後すぐに「受付完了」の応答を返し、タイムアウトを防ぐ。
+
 from flask import Flask, request, jsonify
 import pandas as pd
 import os
 import time
 import subprocess
 import sys
+import threading
 
 app = Flask(__name__)
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -14,6 +19,35 @@ STIMULI_PATH = os.path.join(BASE_PATH, "stimuli")
 VIDEOS_PATH = os.path.join(BASE_PATH, "videos")
 ANALYZER_STATIC_PATH = os.path.join(BASE_PATH, "analyzer.py")
 ANALYZER_VIDEO_PATH = os.path.join(BASE_PATH, "video_analyzer.py")
+
+def run_analysis_in_background(command, temp_csv_path):
+    """バックグラウンドで分析スクリプトを実行する関数"""
+    print(f"--- Starting background analysis: {' '.join(command)} ---")
+    try:
+        # text=Trueとencoding='utf-8'はPython 3.7+で推奨
+        result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', check=False)
+        
+        # 標準出力と標準エラーをログに記録
+        print("\n--- Background Analyzer STDOUT ---")
+        print(result.stdout)
+        print("--- END STDOUT ---\n")
+        
+        if result.returncode != 0:
+            print(f"--- ERROR: Background analysis failed with exit code {result.returncode} ---")
+            print("\n--- Background Analyzer STDERR ---")
+            print(result.stderr)
+            print("--- END STDERR ---\n")
+        else:
+            print("--- Background analysis completed successfully. ---")
+            
+    except Exception as e:
+        print(f"--- CRITICAL: Failed to execute background analysis: {e} ---")
+    finally:
+        # 処理が終わったら一時ファイルを削除
+        if os.path.exists(temp_csv_path):
+            os.remove(temp_csv_path)
+            print(f"Temporary file {temp_csv_path} deleted.")
+
 
 @app.route('/upload', methods=['POST'])
 def upload_data():
@@ -34,7 +68,7 @@ def upload_data():
     try:
         pd.DataFrame(gaze_data, columns=["timestamp", "frame_index", "pupil_radius", "gaze_x", "gaze_y"]).to_csv(temp_csv_path, index=False, encoding='utf-8-sig')
     except Exception as e:
-        print(f"   - ERROR saving CSV: {e}"); return jsonify({"error": "Failed to save data on server"}), 500
+        return jsonify({"error": f"Failed to save data on server: {e}"}), 500
         
     # is_videoフラグに応じて、呼び出すアナライザーと刺激物のパスを切り替える
     if is_video:
@@ -52,27 +86,14 @@ def upload_data():
             return jsonify({"error": f"Stimuli folder '{item_name}' not found on server"}), 404
         command = [sys.executable, analyzer_script, "--csv", temp_csv_path, "--stimuli", item_path]
 
-    print(f"   - Triggering analysis with '{os.path.basename(analyzer_script)}'...")
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', check=False)
-        
-        print("\n--- analyzer output ---")
-        print(result.stdout)
-        print("--- end of output ---\n")
+    # ★★★ 修正点：分析をバックグラウンドのスレッドで実行 ★★★
+    analysis_thread = threading.Thread(target=run_analysis_in_background, args=(command, temp_csv_path))
+    analysis_thread.start()
+    
+    # すぐにクライアントに応答を返す
+    print("   - Analysis task has been dispatched to the background.")
+    return jsonify({"status": "success", "message": "Data received. Analysis is running in the background."}), 202
 
-        if result.returncode != 0:
-            print(f"   - ERROR: Analysis script failed with exit code {result.returncode}")
-            print("\n--- analyzer error ---"); print(result.stderr); print("--- end of error ---\n")
-            if os.path.exists(temp_csv_path): os.remove(temp_csv_path)
-            return jsonify({"error": "Analysis script failed", "details": result.stderr}), 500
-        
-        print("   - Analysis process completed successfully.")
-        if os.path.exists(temp_csv_path): os.remove(temp_csv_path)
-        return jsonify({"status": "success", "message": "Analysis completed."}), 200
-    except Exception as e:
-        print(f"   - ERROR: Failed to execute analysis script: {e}")
-        if os.path.exists(temp_csv_path): os.remove(temp_csv_path)
-        return jsonify({"error": "Failed to start analysis process"}), 500
 
 if __name__ == '__main__':
     # 起動時に必要なフォルダが存在するか確認
