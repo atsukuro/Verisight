@@ -1,6 +1,9 @@
-# video_analyzer.py (v2.2.2 - 構文エラー修正最終版)
-# 修正点：
-# 1. create_analyzed_video関数内にあったSyntaxError ('(' was never closed)を修正。
+# video_analyzer.py (v2.3.0 - 無料プラン最適化版)
+# 新機能：
+# 1. Render無料プランのメモリ上限に対応するため、分析処理を軽量化。
+#    - 輝度計算と順応判定を、全フレームではなく5フレームに1回の間隔（サンプリング）で行う。
+#    - 計算しなかったフレームの値は、直前の計算結果で埋める（前方フィル補間）。
+# 2. これにより、分析のコンセプトを維持しつつ、計算負荷を大幅に削減。
 
 import os
 import sys
@@ -49,35 +52,63 @@ def determine_adaptation_state(luminance_series, look_back_frames=15):
     return state
 
 def analyze_advanced_z_scores(df, video_path):
-    print("--- Starting Advanced Z-Score Analysis ---")
+    print("--- Starting Optimized Advanced Z-Score Analysis ---")
+    
+    # ★★★ 最適化ポイント ★★★
+    SAMPLING_RATE = 5  # 5フレームに1回処理する
+
     video_cap = cv2.VideoCapture(video_path)
     if not video_cap.isOpened():
         print("Error: Could not open video file."); df['pzs'] = 0; return df
-    print("Step 1: Calculating foveal luminance..."); tqdm.pandas(desc="Luminance Calc")
-    df['luminance'] = df.progress_apply(lambda row: get_foveal_luminance(get_frame_from_video(video_cap, int(row.name)), row['gaze_x'], row['gaze_y']), axis=1)
+
+    # --- ステップ1: 間引いたフレームで輝度を計算 ---
+    print(f"Step 1: Calculating foveal luminance (sampling 1/{SAMPLING_RATE} frames)...")
+    
+    # サンプリングするインデックスを作成
+    sampled_indices = df.index[::SAMPLING_RATE]
+    sampled_df = df.loc[sampled_indices].copy()
+    
+    tqdm.pandas(desc="Luminance Calculation")
+    sampled_df['luminance'] = sampled_df.progress_apply(
+        lambda row: get_foveal_luminance(
+            get_frame_from_video(video_cap, int(row.name)),
+            row['gaze_x'],
+            row['gaze_y']
+        ), axis=1
+    )
     FRAME_CACHE.clear()
-    print("Step 2: Determining adaptation state...")
+
+    # --- ステップ2: 全フレームに輝度を補間 ---
+    print("Step 2: Interpolating luminance for all frames...")
+    df['luminance'] = sampled_df['luminance']
+    df['luminance'].fillna(method='ffill', inplace=True) # 前方フィルで補間
+    
+    # --- ステップ3: 順応状態を判定 ---
+    print("Step 3: Determining adaptation state...")
     df['adaptation'] = determine_adaptation_state(df['luminance'])
-    print("Step 3: Calculating PZS within groups...")
+
+    # --- ステップ4: PZSを計算 ---
+    print("Step 4: Calculating PZS within groups...")
     df['pzs'] = np.nan
     df['lum_bin'] = pd.cut(df['luminance'], bins=np.arange(0, 257, 25.6), labels=False, right=False)
     valid_pupil_df = df[df['pupil_radius'] > 0].copy()
+
     for (lum_bin, adaptation), group in tqdm(valid_pupil_df.groupby(['lum_bin', 'adaptation']), desc="PZS Group Calc"):
         if len(group) < 10: continue
         mean_pupil = group['pupil_radius'].mean(); std_pupil = group['pupil_radius'].std()
         if std_pupil > 0:
             df.loc[group.index, 'pzs'] = (group['pupil_radius'] - mean_pupil) / std_pupil
+    
     video_cap.release()
     df['pzs'].fillna(0, inplace=True)
-    print("Advanced Z-Score calculation complete.")
+    print("Optimized Advanced Z-Score calculation complete.")
     return df
 
 def create_analyzed_video(video_path, df, output_path):
+    # (変更なし)
     print("--- Starting Analyzed Video Generation ---")
     try:
-        # ★★★ ここが修正点です ★★★
         video_clip = VideoFileClip(video_path)
-        
         width, height = video_clip.size; matplotlib.rc('font', family='sans-serif')
         fig, ax = plt.subplots(figsize=(width / 100, 2.5), dpi=100); graph_h = int(fig.get_figheight() * fig.dpi); new_height = height + graph_h
 
