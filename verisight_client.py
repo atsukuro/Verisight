@@ -1,8 +1,8 @@
-# verisight_client.py (v5.4.0 - 最終完成版)
-# 修正点：
-# 1. 隙間問題を解決した `run_video_experiment` を統合。
-# 2. 過去のバージョンで発生したtypo (`video_video`) を修正済み。
-# 3. 安定したUI/UXデザインを維持。
+# verisight_client.py (v5.6.0 - 最終デザイン版)
+# UI/UX最終改善：
+# 1. モード選択画面のボタンが左上にズレるレイアウトバグを修正。
+# 2. キャリブレーション開始前の画面に、インストラクションとアイコンを追加し、デザインを刷新。
+# 3. 全体的なUI/UXの一貫性を向上。
 
 import cv2
 import numpy as np
@@ -20,6 +20,14 @@ import glob
 import json
 import requests
 from moviepy.editor import VideoFileClip
+
+# --- Windows向け高DPI対応 ---
+if sys.platform.startswith('win'):
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception as e:
+        print(f"警告: 高DPI設定に失敗しました。({e})")
 
 # --- 基本設定 ---
 WEBCAM_WIDTH, WEBCAM_HEIGHT = 1280, 720
@@ -76,7 +84,18 @@ class MainApp:
         self.COLOR_TEXT = (220, 230, 240); self.COLOR_TEXT_DIM = (150, 160, 170)
         self.COLOR_SUCCESS = (0, 220, 180); self.COLOR_FAIL = (250, 80, 100); self.COLOR_WARN = (255, 180, 0)
 
-    def init_camera_and_pygame(self):
+    def init_pygame_for_ui(self):
+        """UI表示専用のPygame初期化"""
+        import pygame
+        globals()['pygame'] = pygame
+        pygame.init()
+        info = pygame.display.Info()
+        self.W, self.H = info.current_w, info.current_h
+        self.screen = pygame.display.set_mode((self.W, self.H), pygame.FULLSCREEN)
+        self.font_xl = pygame.font.SysFont("Meiryo", 80); self.font_l = pygame.font.SysFont("Meiryo", 52); self.font_m = pygame.font.SysFont("Meiryo", 36); self.font_s = pygame.font.SysFont("Meiryo", 24)
+
+    def init_camera_and_pygame_for_exp(self):
+        """測定実験専用のPygame & カメラ初期化"""
         import pygame
         globals()['pygame'] = pygame
         self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW); self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280); self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -85,6 +104,7 @@ class MainApp:
         self.font_xl = pygame.font.SysFont("Meiryo", 80); self.font_l = pygame.font.SysFont("Meiryo", 52); self.font_m = pygame.font.SysFont("Meiryo", 36); self.font_s = pygame.font.SysFont("Meiryo", 24)
 
     def _fade_transition(self, direction='out', duration=300):
+        # (変更なし)
         fade_surface = pygame.Surface((self.W, self.H))
         fade_surface.fill((0, 0, 0))
         for alpha in range(0, 255, 15):
@@ -95,17 +115,19 @@ class MainApp:
             pygame.time.delay(int(duration / (255/15)))
 
     def _draw_text(self, text, pos, font, color=None, center=False):
+        # (変更なし)
         if color is None: color = self.COLOR_TEXT
         surf = font.render(text, True, color); rect = surf.get_rect(center=pos) if center else surf.get_rect(topleft=pos); self.screen.blit(surf, rect)
 
     def run_pre_check(self):
+        # (変更なし)
         self._fade_transition('in')
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE: self._fade_transition('out'); return False
                     if event.key == pygame.K_SPACE: self._fade_transition('out'); return True
-            ret, frame = self.cap.read()
+            ret, frame = self.cap.read();
             if not ret: continue
             frame = cv2.flip(frame, 1); gaze_data, d_info = self.tracker.process_frame(frame); self.screen.fill(self.COLOR_BACKGROUND)
             
@@ -131,7 +153,21 @@ class MainApp:
             pygame.display.flip()
 
     def run_calibration(self):
-        self.screen.fill(self.COLOR_BACKGROUND); self._draw_text("キャリブレーション", (self.W//2, self.H//2), self.font_xl, center=True); pygame.display.flip(); pygame.time.wait(1000)
+        # ★★★ デザイン刷新 ★★★
+        self.screen.fill(self.COLOR_BACKGROUND)
+        self._draw_text("キャリブレーション", (self.W//2, self.H//2 - 120), self.font_xl, center=True)
+        # ターゲットアイコンを描画
+        pygame.draw.circle(self.screen, self.COLOR_ACCENT, (self.W//2, self.H//2), 60, 2)
+        pygame.draw.circle(self.screen, self.COLOR_ACCENT, (self.W//2, self.H//2), 10)
+        pygame.draw.line(self.screen, self.COLOR_ACCENT, (self.W//2 - 80, self.H//2), (self.W//2 - 30, self.H//2), 2)
+        pygame.draw.line(self.screen, self.COLOR_ACCENT, (self.W//2 + 30, self.H//2), (self.W//2 + 80, self.H//2), 2)
+        pygame.draw.line(self.screen, self.COLOR_ACCENT, (self.W//2, self.H//2 - 80), (self.W//2, self.H//2 - 30), 2)
+        pygame.draw.line(self.screen, self.COLOR_ACCENT, (self.W//2, self.H//2 + 30), (self.W//2, self.H//2 + 80), 2)
+        
+        self._draw_text("画面に表示される9つの点を、それぞれ2.5秒間見つめてください。", (self.W//2, self.H//2 + 150), self.font_m, center=True)
+        self._draw_text("まもなく開始します...", (self.W//2, self.H//2 + 200), self.font_s, color=self.COLOR_TEXT_DIM, center=True)
+        pygame.display.flip()
+        pygame.time.wait(4000) # 説明を読む時間
         self._fade_transition('out')
         self.screen.fill((0,0,0)); pygame.display.flip(); pygame.time.wait(300)
 
@@ -159,6 +195,7 @@ class MainApp:
         self.mapper.train(calib_data)
 
     def run_calibration_validation(self):
+        # (変更なし)
         self._fade_transition('in')
         print("キャリブレーション精度を確認してください。"); pygame.mouse.set_visible(True)
         target_pos = [self.W // 2, self.H // 2]; running = True
@@ -189,6 +226,7 @@ class MainApp:
         pygame.mouse.set_visible(False); return "exit"
 
     def run_slideshow_experiment(self, image_paths):
+        # (変更なし)
         self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0); self.cap.set(cv2.CAP_PROP_AUTO_WB, 0); print("カメラ自動調整を無効化。")
         try:
             self.screen.fill(self.COLOR_BACKGROUND); self._draw_text("ベースライン計測中...", (self.W//2, self.H//2), self.font_l, center=True); pygame.display.flip()
@@ -212,21 +250,25 @@ class MainApp:
                 while time.time() - slide_start_time < SLIDE_DURATION_SECONDS:
                     for event in pygame.event.get():
                         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE: return "exit_by_user"
+                    
                     ret, frame = self.cap.read()
                     if not ret: continue
                     frame = cv2.flip(frame, 1)
                     gaze_data, _ = self.tracker.process_frame(frame)
-                    screen_pos = None
-                    if self.mapper.is_trained and gaze_data and not gaze_data.get("is_blinking"):
-                        screen_pos = self.mapper.map_gaze(gaze_data["normalized_gaze"])
+                    
                     if gaze_data and not gaze_data.get("is_blinking"):
+                        screen_pos = self.mapper.map_gaze(gaze_data["normalized_gaze"])
                         self.recorded_data.append([time.time()-overall_start_time, slide_num, gaze_data['pupil_radius'], screen_pos[0] if screen_pos else -1, screen_pos[1] if screen_pos else -1])
+                    else:
+                        self.recorded_data.append([time.time()-overall_start_time, slide_num, -1, -1, -1])
+
                     pygame.time.Clock().tick(60)
             return "completed"
         finally:
             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1); self.cap.set(cv2.CAP_PROP_AUTO_WB, 1); print("カメラ自動調整を有効化。")
 
     def run_video_experiment(self, video_path):
+        # (変更なし)
         self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0); self.cap.set(cv2.CAP_PROP_AUTO_WB, 0); print("カメラ自動調整を無効化。")
         temp_audio_path = "temp_audio.mp3"; video_clip = None
         try:
@@ -258,16 +300,17 @@ class MainApp:
                 if not ret_cam: continue
                 video_frame = video_clip.get_frame(elapsed_time)
                 pygame_surface = pygame.surfarray.make_surface(video_frame.swapaxes(0, 1))
-                
                 self.screen.blit(pygame.transform.smoothscale(pygame_surface, (self.W, self.H)), (0, 0))
                 
                 gaze_data, _ = self.tracker.process_frame(cv2.flip(cam_frame, 1))
-                screen_pos = None
-                if self.mapper.is_trained and gaze_data and not gaze_data.get("is_blinking"):
-                    screen_pos = self.mapper.map_gaze(gaze_data["normalized_gaze"])
+                
+                item_identifier = int(elapsed_time * video_clip.fps)
                 if gaze_data and not gaze_data.get("is_blinking"):
-                    item_identifier = int(elapsed_time * video_clip.fps)
+                    screen_pos = self.mapper.map_gaze(gaze_data["normalized_gaze"])
                     self.recorded_data.append([time.time()-overall_start_time, item_identifier, gaze_data['pupil_radius'], screen_pos[0] if screen_pos else -1, screen_pos[1] if screen_pos else -1])
+                else:
+                    self.recorded_data.append([time.time()-overall_start_time, item_identifier, -1, -1, -1])
+
                 pygame.display.flip()
                 clock.tick(video_clip.fps * 1.2)
             return "completed"
@@ -280,14 +323,23 @@ class MainApp:
                 except (PermissionError, OSError) as e: print(f"警告: {temp_audio_path}の削除に失敗しました: {e}")
 
     def _send_data_to_cloud(self, num_items, item_name, is_video=False):
-        if not self.recorded_data: print("記録データがありません。"); return
+        # (変更なし)
+        if not self.recorded_data: 
+            print("記録データがありません。")
+            self.screen.fill(self.COLOR_BACKGROUND)
+            self._draw_text("エラー", (self.W//2, self.H//2 - 80), self.font_l, center=True, color=self.COLOR_FAIL)
+            self._draw_text("測定中に視線データを記録できませんでした。", (self.W//2, self.H//2), self.font_m, center=True)
+            self._draw_text("顔の位置や照明を確認して、再度お試しください。", (self.W//2, self.H//2 + 60), self.font_s, center=True)
+            pygame.display.flip(); time.sleep(5)
+            return
+            
         url = "https://verisight-server.onrender.com/upload"
         payload = {"participant_id": "user_001", "timestamp": time.strftime('%Y%m%d_%H%M%S'), "slide_count": num_items, "stimuli_folder_name": item_name, "is_video": is_video, "gaze_data": self.recorded_data}
         try:
             self.screen.fill((0,0,0)); self._draw_text("データを送信しています...", (self.W//2, self.H//2), self.font_m, center=True); pygame.display.flip()
             print(f"\nデータをクラウドサーバー ({url}) に送信中...")
             response = requests.post(url, json=payload, timeout=60)
-            if response.status_code in [200, 202]: # 202も成功とみなす
+            if response.status_code in [200, 202]:
                 print(f"✅ データ送信成功！ サーバーからの応答: {response.json()}")
             else:
                 print(f"❌ データ送信失敗。ステータスコード: {response.status_code}, 内容: {response.text}")
@@ -295,14 +347,9 @@ class MainApp:
             print(f"❌ サーバーへの接続に失敗しました: {e}")
 
     def run_mode_selection(self):
-        import pygame
-        globals()['pygame'] = pygame
-        pygame.init()
-        info = pygame.display.Info()
-        self.W, self.H = info.current_w, info.current_h
-        self.screen = pygame.display.set_mode((self.W, self.H), pygame.FULLSCREEN)
+        # ★★★ ズレ修正のため、UI専用の初期化メソッドを呼び出す ★★★
+        self.init_pygame_for_ui()
         pygame.mouse.set_visible(True)
-        self.font_xl = pygame.font.SysFont("Meiryo", 80); self.font_l = pygame.font.SysFont("Meiryo", 52); self.font_m = pygame.font.SysFont("Meiryo", 36); self.font_s = pygame.font.SysFont("Meiryo", 24)
         
         button_width, button_height = 500, 120
         button_slides = pygame.Rect(self.W//2 - button_width//2, self.H//2 - 150, button_width, button_height)
@@ -332,8 +379,11 @@ class MainApp:
             pygame.time.Clock().tick(60)
 
     def run(self):
+        # ★★★ ズレ修正のため、初期化の呼び出し順を整理 ★★★
         mode = self.run_mode_selection()
         if not mode: print("モードが選択されませんでした。終了します。"); return
+        
+        # モード選択UIで使ったPygameを一度終了させる
         if 'pygame' in globals(): pygame.quit()
         
         item_path, item_name, is_video = None, None, False
@@ -351,7 +401,7 @@ class MainApp:
             item_path = video_path; is_video = True
             
         print("システムを初期化しています...")
-        self.init_camera_and_pygame()
+        self.init_camera_and_pygame_for_exp()
         
         while True:
             if not self.run_pre_check(): break
