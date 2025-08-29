@@ -14,7 +14,7 @@ import threading
 app = Flask(__name__)
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 
-# 各種パスを定義
+# 各種パス定義
 STIMULI_PATH = os.path.join(BASE_PATH, "stimuli")
 VIDEOS_PATH = os.path.join(BASE_PATH, "videos")
 ANALYZER_STATIC_PATH = os.path.join(BASE_PATH, "analyzer.py")
