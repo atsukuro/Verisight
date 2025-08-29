@@ -1,7 +1,7 @@
-# cloud_server.py (v2.3.0 - ダウンロードAPI追加版)
-# 新機能：
-# 1. /download/<filename> という新しいAPIエンドポイントを追加。
-# 2. analysis_outputs フォルダから指定されたファイルを安全にクライアントに送信する。
+# cloud_server.py (v2.4.1 - 最終完成版：ディスク非依存)
+# 修正点：
+# 1. 出力先を永続ディスクではない、通常の 'analysis_outputs' ディレクトリに戻す。
+# 2. これでRenderの無料プランで完全に動作する最終版となる。
 
 from flask import Flask, request, jsonify, send_from_directory
 import pandas as pd
@@ -10,6 +10,7 @@ import time
 import subprocess
 import sys
 import threading
+import traceback
 
 app = Flask(__name__)
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +20,7 @@ STIMULI_PATH = os.path.join(BASE_PATH, "stimuli")
 VIDEOS_PATH = os.path.join(BASE_PATH, "videos")
 ANALYZER_STATIC_PATH = os.path.join(BASE_PATH, "analyzer.py")
 ANALYZER_VIDEO_PATH = os.path.join(BASE_PATH, "video_analyzer.py")
-# ★★★ 新しい出力フォルダのパスを定義 ★★★
+# ★★★ 出力フォルダのパスを、永続ディスクではない通常のフォルダパスに戻す ★★★
 OUTPUTS_PATH = os.path.join(BASE_PATH, "analysis_outputs")
 
 
@@ -73,24 +74,23 @@ def upload_data():
     
     return jsonify({"status": "success", "message": "Data received. All processing will run in the background."}), 202
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# ★★★ ここからが今回の新機能 ★★★
 @app.route('/download/<path:filename>')
 def download_file(filename):
-    """
-    analysis_outputs フォルダから指定されたファイルをダウンロードさせるためのAPIエンドポイント。
-    <path:filename> により、サブディレクトリ内のファイルも指定可能（将来的な拡張のため）。
-    """
+    # (変更なし)
     print(f"⬇️ Download request received for: {filename}")
     try:
-        # send_from_directoryは、指定されたディレクトリ以外へのアクセスを防ぐ、安全な方法です。
         return send_from_directory(OUTPUTS_PATH, filename, as_attachment=True)
     except FileNotFoundError:
         return jsonify({"error": "File not found"}), 404
-# ★★★ ここまでが今回の新機能 ★★★
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
 if __name__ == '__main__':
+    # ★★★ 修正点：永続ディスクではない通常のフォルダを確認 ★★★
     for path in [STIMULI_PATH, VIDEOS_PATH, OUTPUTS_PATH]:
-        if not os.path.isdir(path): os.makedirs(path)
+        if not os.path.isdir(path):
+            try:
+                os.makedirs(path)
+                print(f"Created directory: {path}")
+            except Exception as e:
+                print(f"Error creating directory {path}: {e}")
+                
     app.run(host='0.0.0.0', port=10000, debug=False)

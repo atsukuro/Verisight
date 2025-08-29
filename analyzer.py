@@ -1,7 +1,7 @@
-# analyzer.py (v2.1.0 - 静止画用・最終完成版)
+# analyzer.py (v2.2.1 - 静止画用・最終完成版)
 # 修正点：
-# 1. 分析結果の出力先フォルダを、タイムスタンプを含まない 'analysis_outputs' に統一。
-# 2. サーバー環境で不要なeasyguiのimportを削除済み。
+# 1. 出力先を永続ディスクではない通常の 'analysis_outputs' フォルダに戻す。
+# 2. 分析完了時に、ログに分かりやすいメッセージを出力するように変更。
 
 import pandas as pd
 import cv2
@@ -10,14 +10,12 @@ import os
 import glob
 import time
 import matplotlib
-matplotlib.use('Agg') # サーバー環境用の設定
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import FontProperties
 import argparse
 
-# --- 日本語フォント設定 ---
 def set_japanese_font():
-    # Renderサーバーには日本語フォントがないため、デフォルトのsans-serifを使用する
     matplotlib.rc('font', family='sans-serif')
     print("Font set to sans-serif for server environment.")
 
@@ -67,59 +65,56 @@ def main():
     parser.add_argument("--stimuli", required=True, help="Path to the stimuli image folder.")
     args = parser.parse_args()
     
-    print("--- Verisight Static Analyzer v2.1.0 ---")
+    print("--- Verisight Static Analyzer v2.2.1 ---")
     
-    # ★★★ 修正点：出力先フォルダを 'analysis_outputs' に統一 ★★★
     output_folder = "analysis_outputs"
     os.makedirs(output_folder, exist_ok=True)
 
     try:
         df = pd.read_csv(args.csv)
-        # サーバーから渡される列名に合わせる
         df.columns = ["timestamp", "slide_number", "pupil_radius", "gaze_x", "gaze_y"]
     except Exception as e:
         print(f"CSV read failed: {e}"); return
 
-    # PZS計算
     if 'pupil_radius' in df.columns and not df['pupil_radius'].isnull().all():
         valid_pupil_data = df[df['pupil_radius'] > 0]['pupil_radius']
         if not valid_pupil_data.empty:
-            mean_pupil = valid_pupil_data.mean()
-            std_pupil = valid_pupil_data.std()
+            mean_pupil = valid_pupil_data.mean(); std_pupil = valid_pupil_data.std()
             df['pzs'] = (df['pupil_radius'] - mean_pupil) / std_pupil if std_pupil > 0 else 0
-        else:
-            df['pzs'] = 0
-    else:
-        df['pzs'] = 0
+        else: df['pzs'] = 0
+    else: df['pzs'] = 0
     df['pzs'].fillna(0, inplace=True)
 
     image_files = sorted(glob.glob(os.path.join(args.stimuli, '*.jpg')) + glob.glob(os.path.join(args.stimuli, '*.png')))
+    generated_files = []
     
     for slide_num in df['slide_number'].unique():
         slide_df = df[df['slide_number'] == slide_num]
         slide_num_int = int(slide_num)
-        if slide_df.empty or (slide_num_int - 1) >= len(image_files) or (slide_num_int - 1) < 0:
-            continue
+        if slide_df.empty or (slide_num_int - 1) >= len(image_files) or (slide_num_int - 1) < 0: continue
         
         print(f"Analyzing slide {slide_num_int}...")
         image_path = image_files[slide_num_int - 1]
         image = cv2.imdecode(np.fromfile(image_path, np.uint8), cv2.IMREAD_COLOR)
-        if image is None:
-            print(f"  - Failed to load image: {image_path}"); continue
+        if image is None: print(f"  - Failed to load image: {image_path}"); continue
             
         gaze_points = list(zip(slide_df['gaze_x'].astype(int), slide_df['gaze_y'].astype(int)))
 
-        # ヒートマップ生成
-        heatmap_img = generate_heatmap(image.copy(), gaze_points)
         heatmap_filename = f"heatmap_slide_{slide_num_int}_{time.strftime('%Y%m%d%H%M%S')}.jpg"
+        heatmap_img = generate_heatmap(image.copy(), gaze_points)
         cv2.imwrite(os.path.join(output_folder, heatmap_filename), heatmap_img)
+        generated_files.append(heatmap_filename)
         
-        # ゲイズプロット生成
-        gazeplot_img = generate_gaze_plot(image.copy(), slide_df)
         gazeplot_filename = f"gazeplot_slide_{slide_num_int}_{time.strftime('%Y%m%d%H%M%S')}.jpg"
+        gazeplot_img = generate_gaze_plot(image.copy(), slide_df)
         cv2.imwrite(os.path.join(output_folder, gazeplot_filename), gazeplot_img)
+        generated_files.append(gazeplot_filename)
 
-    print("--- Analysis complete. ---")
+    print("\n--- Analysis complete. ---")
+    print("Successfully generated the following files:")
+    for f in generated_files:
+        print(f"- {f}")
+    print("You can now download these files using the /download/ endpoint.")
 
 if __name__ == '__main__':
     main()
