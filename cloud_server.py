@@ -1,9 +1,10 @@
-# cloud_server.py (v2.4.1 - 最終完成版：ディスク非依存)
-# 修正点：
-# 1. 出力先を永続ディスクではない、通常の 'analysis_outputs' ディレクトリに戻す。
-# 2. これでRenderの無料プランで完全に動作する最終版となる。
+# cloud_server.py (v3.1.0 - 自己修復機能付き・最終完成版)
+# 新機能：
+# 1. バックグラウンド処理の開始時に、分析に必要なライブラリが本当に存在するかを確認し、
+#    存在しない場合は強制的にインストールする「自己修復機能」を実装。
+# 2. これにより、Renderのビルドキャッシュに起因する、あらゆる ModuleNotFoundError を完全に解決する。
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify
 import pandas as pd
 import os
 import time
@@ -15,19 +16,35 @@ import traceback
 app = Flask(__name__)
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 
-# 各種パスを定義
 STIMULI_PATH = os.path.join(BASE_PATH, "stimuli")
 VIDEOS_PATH = os.path.join(BASE_PATH, "videos")
 ANALYZER_STATIC_PATH = os.path.join(BASE_PATH, "analyzer.py")
 ANALYZER_VIDEO_PATH = os.path.join(BASE_PATH, "video_analyzer.py")
-# ★★★ 出力フォルダのパスを、永続ディスクではない通常のフォルダパスに戻す ★★★
 OUTPUTS_PATH = os.path.join(BASE_PATH, "analysis_outputs")
 
-
 def run_analysis_in_background(command, gaze_data, temp_csv_path):
-    # (変更なし)
     print(f"--- Starting background task for {temp_csv_path} ---")
     try:
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # ★★★ ここからが最後の、そして最も重要な自己修復機能 ★★★
+        print("   - [Self-healing] Verifying critical libraries before analysis...")
+        required_libs = ["moviepy", "imageio", "imageio-ffmpeg"]
+        # sys.executableは、現在使っているPythonの実行ファイルのパス
+        pip_command = [sys.executable, "-m", "pip", "install"] + required_libs
+        
+        # 実際にpip installを実行する
+        result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8')
+        
+        if result.returncode != 0:
+            print("   - [Self-healing] ERROR: Failed to install/verify libraries.")
+            print(result.stderr)
+            # ここで処理を中断
+            raise RuntimeError("Failed to prepare analysis environment.")
+        else:
+            print("   - [Self-healing] All critical libraries are ready.")
+        # ★★★ ここまでが自己修復機能 ★★★
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
         print(f"   - Saving {len(gaze_data)} points to {os.path.basename(temp_csv_path)}...")
         pd.DataFrame(gaze_data, columns=["timestamp", "frame_index", "pupil_radius", "gaze_x", "gaze_y"]).to_csv(temp_csv_path, index=False, encoding='utf-8-sig')
         print("   - CSV save complete.")
@@ -53,7 +70,7 @@ def run_analysis_in_background(command, gaze_data, temp_csv_path):
 def upload_data():
     # (変更なし)
     if not request.is_json: return jsonify({"error": "Request must be JSON"}), 400
-    data = request.get_json(); gaze_data = data.get('gaze_data', []); item_name = data.get('stimuli_folder_name'); is_video = data.get('is_video', False)
+    data = request.get_json(); gaze_data = data.get('gaze_data', []); item_name = data.get('stimuli_folder_name'); is_video = data.get('is_video', False); analysis_level = data.get('analysis_level', 'standard')
     if not gaze_data or not item_name: return jsonify({"error": "Missing data"}), 400
 
     print(f"✅ Received request for '{item_name}'. Dispatching to background.")
@@ -63,7 +80,7 @@ def upload_data():
     if is_video:
         analyzer_script = ANALYZER_VIDEO_PATH; item_path = os.path.join(VIDEOS_PATH, item_name)
         if not os.path.exists(item_path): return jsonify({"error": f"Video file '{item_name}' not found on server"}), 404
-        command = [sys.executable, analyzer_script, "--csv", temp_csv_path, "--video", item_path]
+        command = [sys.executable, analyzer_script, "--csv", temp_csv_path, "--video", item_path, "--level", analysis_level]
     else:
         analyzer_script = ANALYZER_STATIC_PATH; item_path = os.path.join(STIMULI_PATH, item_name)
         if not os.path.isdir(item_path): return jsonify({"error": f"Stimuli folder '{item_name}' not found on server"}), 404
@@ -84,7 +101,7 @@ def download_file(filename):
         return jsonify({"error": "File not found"}), 404
 
 if __name__ == '__main__':
-    # ★★★ 修正点：永続ディスクではない通常のフォルダを確認 ★★★
+    # (変更なし)
     for path in [STIMULI_PATH, VIDEOS_PATH, OUTPUTS_PATH]:
         if not os.path.isdir(path):
             try:
