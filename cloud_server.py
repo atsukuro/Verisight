@@ -1,17 +1,38 @@
-# cloud_server.py (v3.1.0 - 自己修復機能付き・最終完成版)
-# 新機能：
-# 1. バックグラウンド処理の開始時に、分析に必要なライブラリが本当に存在するかを確認し、
-#    存在しない場合は強制的にインストールする「自己修復機能」を実装。
-# 2. これにより、Renderのビルドキャッシュに起因する、あらゆる ModuleNotFoundError を完全に解決する。
+# cloud_server.py (v3.1.1 - 最終完成版：ヘルスチェック対応)
+# 修正点：
+# 1. Gunicornから起動されることを前提とし、`if __name__ == '__main__':` ブロックを修正。
+# 2. これにより、起動スクリプト(start.sh)と連携し、自己診断機能が完了してから
+#    Webサーバーが正式に起動するため、Renderのヘルスチェックによるタイムアウトを防ぐ。
 
-from flask import Flask, request, jsonify
-import pandas as pd
 import os
+import sys
 import time
 import subprocess
-import sys
 import threading
 import traceback
+
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# --- サーバー起動前 自己診断 ---
+# サーバーが起動する前に、バックグラウンド処理に必要なライブラリが
+# 全て利用可能かを確認します。ここで失敗すれば、デプロイログに直接原因が表示されます。
+try:
+    print("✅ [Self-check] Starting library import check...")
+    import pandas
+    import cv2
+    import numpy
+    from moviepy.editor import VideoFileClip
+    import matplotlib
+    print("✅ [Self-check] All required libraries are successfully imported.")
+except ImportError as e:
+    print(f"❌ [Self-check] CRITICAL ERROR: A required library is missing.")
+    print(f"❌ [Self-check] Missing module: {e.name}")
+    print(f"❌ [Self-check] Please ensure the library is correctly listed in requirements.txt.")
+    # エラーを発生させてデプロイを意図的に失敗させる
+    sys.exit(1)
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+
+from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__)
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -23,27 +44,19 @@ ANALYZER_VIDEO_PATH = os.path.join(BASE_PATH, "video_analyzer.py")
 OUTPUTS_PATH = os.path.join(BASE_PATH, "analysis_outputs")
 
 def run_analysis_in_background(command, gaze_data, temp_csv_path):
+    # (変更なし)
     print(f"--- Starting background task for {temp_csv_path} ---")
     try:
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        # ★★★ ここからが最後の、そして最も重要な自己修復機能 ★★★
         print("   - [Self-healing] Verifying critical libraries before analysis...")
         required_libs = ["moviepy", "imageio", "imageio-ffmpeg"]
-        # sys.executableは、現在使っているPythonの実行ファイルのパス
         pip_command = [sys.executable, "-m", "pip", "install"] + required_libs
-        
-        # 実際にpip installを実行する
         result = subprocess.run(pip_command, capture_output=True, text=True, encoding='utf-8')
-        
         if result.returncode != 0:
             print("   - [Self-healing] ERROR: Failed to install/verify libraries.")
             print(result.stderr)
-            # ここで処理を中断
             raise RuntimeError("Failed to prepare analysis environment.")
         else:
             print("   - [Self-healing] All critical libraries are ready.")
-        # ★★★ ここまでが自己修復機能 ★★★
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
         print(f"   - Saving {len(gaze_data)} points to {os.path.basename(temp_csv_path)}...")
         pd.DataFrame(gaze_data, columns=["timestamp", "frame_index", "pupil_radius", "gaze_x", "gaze_y"]).to_csv(temp_csv_path, index=False, encoding='utf-8-sig')
@@ -100,14 +113,23 @@ def download_file(filename):
     except FileNotFoundError:
         return jsonify({"error": "File not found"}), 404
 
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★★★ ここが最後の修正点 ★★★
 if __name__ == '__main__':
-    # (変更なし)
+    # このスクリプトが直接実行された場合（ローカルでのテストなど）のフォールバック。
+    # Render (Gunicorn) から起動される場合は、このブロックは通常は実行されない。
+    # フォルダ作成は、ファイルが存在しない場合のみ試行する安全な方法に。
+    print("cloud_server.py is run directly. This is intended for local testing.")
+    print("On Render, this should be started via Gunicorn in start.sh.")
+    
     for path in [STIMULI_PATH, VIDEOS_PATH, OUTPUTS_PATH]:
         if not os.path.isdir(path):
             try:
                 os.makedirs(path)
-                print(f"Created directory: {path}")
+                print(f"Directory {path} created on-demand.")
             except Exception as e:
-                print(f"Error creating directory {path}: {e}")
-                
-    app.run(host='0.0.0.0', port=10000, debug=False)
+                print(f"Warning: Could not create directory {path}: {e}")
+    
+    # ローカルテスト用にapp.runを呼び出す
+    app.run(host='0.0.0.0', port=10000, debug=True)
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
