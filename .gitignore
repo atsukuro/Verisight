@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+
+# Analysis outputs
+analysis_outputs/
+temp_audio.mp3
+
+# IDE/Editor specific
+.vscode/
+.idea/
