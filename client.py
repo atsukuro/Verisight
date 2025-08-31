@@ -315,7 +315,7 @@ class MainApp:
             pygame.display.flip(); time.sleep(5)
             return
             
-        url = "https://verisight-server.onrender.com/upload"
+        url = "https://verisight-365650487388.asia-northeast1.run.app/upload"
         payload = {"participant_id": "user_001", "timestamp": time.strftime('%Y%m%d_%H%M%S'), "slide_count": num_items, "stimuli_folder_name": item_name, "is_video": is_video, "gaze_data": self.recorded_data, "analysis_level": analysis_level}
         try:
             self.screen.fill((0,0,0)); self._draw_text("データを送信しています...", (self.W//2, self.H//2), self.font_m, center=True); pygame.display.flip()
