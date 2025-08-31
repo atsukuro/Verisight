@@ -1,4 +1,4 @@
-# app.py (v5.0.0 - 命名規則統一・GCP対応版)
+# app.py (v5.1.0 - 最終完成版：自己フォルダ作成機能)
 from flask import Flask, request, jsonify, send_from_directory
 import pandas as pd
 import os
@@ -12,10 +12,20 @@ app = Flask(__name__)
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
 STIMULI_PATH = os.path.join(BASE_PATH, "stimuli")
 VIDEOS_PATH = os.path.join(BASE_PATH, "videos")
-# ★★★ 新しいファイル名に合わせて修正 ★★★
 ANALYZER_STATIC_PATH = os.path.join(BASE_PATH, "analyzer_static.py")
 ANALYZER_VIDEO_PATH = os.path.join(BASE_PATH, "analyzer_video.py")
 OUTPUTS_PATH = os.path.join(BASE_PATH, "analysis_outputs")
+
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# ★★★ ここが最後の、そして最も重要な修正点 ★★★
+# サーバー起動時に、出力先フォルダが存在するか確認し、なければ作成する
+try:
+    os.makedirs(OUTPUTS_PATH, exist_ok=True)
+    print(f"✅ Output directory '{OUTPUTS_PATH}' is ready.")
+except Exception as e:
+    print(f"❌ CRITICAL ERROR: Could not create output directory '{OUTPUTS_PATH}': {e}")
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
 
 def run_analysis_in_background(command, gaze_data, temp_csv_path):
     print(f"--- Starting background task for {temp_csv_path} ---")
@@ -49,7 +59,8 @@ def upload_data():
 
     print(f"✅ Received request for '{item_name}'. Dispatching to background.")
     timestamp = time.strftime('%Y%m%d_%H%M%S')
-    temp_csv_path = os.path.join(OUTPUTS_PATH, f"temp_data_{timestamp}.csv") # 一時ファイルも出力フォルダに作成
+    # 一時ファイルも出力フォルダに作成
+    temp_csv_path = os.path.join(OUTPUTS_PATH, f"temp_data_{timestamp}.csv") 
         
     if is_video:
         analyzer_script = ANALYZER_VIDEO_PATH; item_path = os.path.join(VIDEOS_PATH, item_name)
@@ -68,11 +79,8 @@ def upload_data():
 @app.route('/download/<path:filename>')
 def download_file(filename):
     print(f"⬇️ Download request received for: {filename}")
-    # Cloud Runでは、/app/analysis_outputs のように絶対パスで指定するのが確実
     return send_from_directory(OUTPUTS_PATH, filename, as_attachment=True)
 
 if __name__ == '__main__':
-    # この部分はローカルでのテスト実行時にのみ使用される
-    os.makedirs(OUTPUTS_PATH, exist_ok=True)
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port, debug=True)
